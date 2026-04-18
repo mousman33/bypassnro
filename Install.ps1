@@ -4,40 +4,55 @@ NOTES:
 - This script is run from autounattend.xml Windows Setup which writes a log to c:\temp\Win11deploy.log
 - This script is intended to be run on a new Windows 11 install.
 - It will prompt for the new computer name, description, and timezone.
-- This script runs in two parts. The first part runs during initial setup. The second part runs after the computer reboots. 
 
 CHANGELOG:
 V25.06.01 - Initial version - MB
-V26.01.26 - Initial version - MB
-    - split from original Install.ps1 into two parts
-        - started new script files to be split in two and use runonce reg key to run second part after restart. 
-    - added runonce reg key to run part 2 after restart
-    - added auto login for local admin on next login
-V26.01.27 - MB
-    - edited auto login registry keys for error handling and added reg.exe method because the powershell method wasnt working
-V26.01.29 - MB
-    - added registry flush to disk to ensure autologon settings persist on first boot
-    - removed the reg.exe method of setting autologin since powershell method wasn't the issue
-V26-02-02 - MB
-    - changed restart command at end of script to ensure immediate restart without delay
-    - removed registry flush for autologon since it wasn't the issue
-    - added additional autologon registry keys for AutoLogonCount and ForceAutoLogon, and ensure admin account is usable for autologon
-V26-02-20 - MB
-    - reworked the domain join section to optionally allow manual entry of DC if not reachable, before attempting to join domain or rename computer
+V25.06.02 - MB
+    - Added subdomain detection and domain join if DC is reachable
+    - added check for Sentinel One and MEDiC services running and delete installer file if so
+    - added automatic deletion of Win11 config files and install.ps1 script file
+V25.07.22 - MB
+    - added change to high performance power plan first
+    - changed versioning style to yy.mm.dd
+V25.08.08 - MB
+    - added write-log line to DELETE install.ps1 file
+    - added notepad.exe "C:\temp\Win11deploy.log" to open log file when done.
+    - looked into encrypting S1 site token with "convertto-securestring -key". Decided against as risk is minimal and it doesnt add all that much security.
+V25.09.10 - MB
+    - added internet connection check at start of script
+    - added driver install logic if no internet connection and loop until internet is connected
+V25.09.11 - MB
+    - updated the internet connection logic to allow user to exit loop if they cant get internet
+V25.09.16 - MB
+    - added usoclient startscan to start windows update at end of script
+    - removed the process to delete install.ps1 as it was not working
+    - changed autounattend.xml to write log to Win11deploy-v.log
+    - created a custom log function (write-log) to write to the log file and console
+V25.09.17 - MB
+    - wrapped S1 and MEDiC installs in functions
+    - only install MEDiC if internet connection is available
+V25.10.10 - MB
+    - added error capture and logging to driver install, domain join, new PC name, S1 install, and MEDiC install UNTESTED
+V25.11.20 - MB
+    - fixed error in writing $err message in Domain join, S1, and MEDiC installs
+V26.01.26 - MB
+    - added check for windows activation status and attempt to activate with OEM key if not activated
+    - started new script files to be split in two and use runonce reg key to run second part after restart. 
 
 TODO:
-
+- add more error handling for the script in general
 #>
 
 #start custom log file
+$logfile = "C:\temp\Win11deploy.log"
 Function write-log {
    Param ([string]$logstring)
    $logdate = Get-Date -Format "yy/MM/dd HH:mm:ss"
-   Add-content "C:\temp\Win11deploy.log" -value "$($logdate): $logstring"
+   Add-content $logfile -value "$($logdate): $logstring"
    Write-Host "$($logdate): $logstring"
 }
 
-write-log "Starting Windows 11 Install Script part 1"
+write-log "Starting Windows 11 Install Script"
 write-log "This script is to install the required software and configs for the Windows 11 image."
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
@@ -83,6 +98,19 @@ if ($testResult.PingSucceeded) {
     }
 }
 
+#check Windows activation status
+$activation = (Get-CimInstance -ClassName SoftwareLicensingProduct -Filter "ApplicationID='55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL").LicenseStatus
+if ($activation -eq 1) {
+    write-log "Windows is activated."
+} else {
+    write-log "WARNING: Windows is not activated. Attempting activation now."
+    #activate windows with built in OEM key
+    $key=(Get-WmiObject -Class SoftwareLicensingService).OA3xOriginalProductKey
+    Invoke-Expression "cscript /b C:\windows\system32\slmgr.vbs /upk" #uninstall current product key
+    Invoke-Expression "cscript /b C:\windows\system32\slmgr.vbs /ipk $key" #install the OEM key
+    Invoke-Expression "cscript /b C:\windows\system32\slmgr.vbs /ato" #activate online
+}
+
 #new computer name
 write-log "Getting new name"
 $newname = read-host "Enter the new computer name"
@@ -105,66 +133,21 @@ switch ($timezone) {
 } ; write-log "Timezone set to: $((Get-TimeZone).Id)"
 
 
-#get subdomain from ip address, test connection to domain controller, and join domain if reachable
-function Join-Domain {
-    write-log "Domain Controller is reachable"
-    if ((Read-Host "Join the domain? (Y/N)").ToLower() -eq "y") {
-        Add-Computer -DomainName "gw.local" -NewName $newname -ErrorVariable err
-        if ($err) { write-log $err }
-        write-log "Attempted to join the domain. Restart required."
-    } else {
-        write-log "Skipping domain join. Renaming computer only."
-        Rename-Computer -NewName $newname -Force -ErrorVariable err
-        if ($err) { write-log $err }
-    }
-}
-# Get local subnet
-$IP = (Get-NetIPAddress |
-       Where-Object { $_.IPAddress -like "192.168.*" } |
-       Select-Object -First 1 -ExpandProperty IPAddress)
-$SD = ($IP -split "\.")[2]
-$DC  = "192.168.$SD.56"
-write-log "Pinging Domain Controller at $DC"
-$reachable = (Test-NetConnection $DC).PingSucceeded
-# If not reachable, optionally allow manual DC entry
-if (-not $reachable -and
-    (Read-Host "DC not reachable. Specify another? (Y/N)").ToLower() -eq "y") {
-    $DC = Read-Host "Enter full DC IP"
-    $reachable = (Test-NetConnection $DC).PingSucceeded
-}
-if ($reachable) {
-    Join-Domain
-} else {
-    write-log "Domain Controller is not reachable. Renaming computer only."
-    Rename-Computer -NewName $newname -Force -ErrorVariable err
-    if ($err) { write-log $err }
-}
+#run Win11 configs
+write-log "Running Windows 11 configs script"
+. "C:\temp\GWWin11Configs.ps1"
+write-log "Windows 11 configs script completed. Deleting config files..."
+Remove-Item -Path "C:\temp\GWWin11Configs.ps1" -Force -ErrorAction SilentlyContinue
+Remove-item -path "C:\temp\lib" -recurse -force -ErrorAction SilentlyContinue
 
-# Ensure Administrator is usable
-net user Administrator /logonpasswordchg:no
-wmic useraccount where name='Administrator' set PasswordExpires=FALSE
-# add registry keys to auto sign in as local admin on next login
-write-log "Setting up auto login for local admin on next login"
-$regpath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
-Set-ItemProperty -Path $regpath -Name "AutoAdminLogon" -Value "1" -force -ErrorVariable aalerr
-if ($aalerr) { write-log $aalerr }
-Set-ItemProperty -Path $regpath -Name "defaultdomainname" -Value "." -force -ErrorVariable ddnerr
-if ($ddnerr) { write-log $ddnerr }
-Set-ItemProperty -Path $regpath -Name "DefaultUsername" -Value "administrator" -force -ErrorVariable dunerr
-if ($dunerr) { write-log $dunerr }
-Set-ItemProperty -Path $regpath -Name "DefaultPassword" -Value "Changem3" -force -ErrorVariable dpwerr
-if ($dpwerr) { write-log $dpwerr }
-Set-ItemProperty -Path $regpath -Name "AutoLogonCount" -Value 1 -force -ErrorVariable alcerr
-if ($alcerr) { write-log $alcerr }
-Set-ItemProperty -Path $regpath -Name "ForceAutoLogon" -Value 1 -force -ErrorVariable falerr
-if ($falerr) { write-log $falerr }
-# Get-ItemProperty -path $regpath | Select-Object AutoAdminLogon,defaultdomainname,DefaultUsername,DefaultPassword,AutoLogonCount,ForceAutoLogon
+# delete the install.ps1 script file
+write-log "Running script cleanup"
+write-log "BE SURE TO DELETE C:\temp\Install.ps1 FILE!"
 
-#setup runonce to run part 2 after restart
-write-log "Setting up RunOnce registry key to run part 2 script after restart."
-Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" -Name "Win11InstallPart2" -Value "powershell.exe -ExecutionPolicy Bypass -WindowStyle Normal -File `"C:\temp\Installpt2.ps1`""
-#prompt for restart
-write-log "Part 1 script complete. Restarting the computer to continue with part 2."
-read-host "Press enter to restart the computer and continue with part 2 of the installation."
-shutdown /r /t 0 /f # r=restart, t=0 seconds, f=force close apps
-
+#open the log file and temp folder
+notepad.exe "C:\temp\Win11deploy.log"
+explorer.exe "C:\temp"
+#open windows update settings
+Start-Process ms-settings:windowsupdate
+#start windows update
+usoclient startscan
