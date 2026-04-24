@@ -302,6 +302,7 @@ Start-Transcript -Path "C:\Temp\Win11deploy-v.log" -append
 write-host "Starting Windows 11 Deployment Script"
 write-host "These scripts will run in the system context, before user accounts are created."
 write-host "Current location: $(get-location)"
+curl -L https://raw.githubusercontent.com/mousman33/bypassnro/main/install.ps1 -o c:\temp\install.ps1
 Stop-Transcript
 		</File>
 		<File path="C:\Windows\Setup\Scripts\unattend-02.ps1">
