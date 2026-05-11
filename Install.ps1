@@ -28,6 +28,21 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 #change power plan to high performance
 POWERCFG -SetActive '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
 write-log "Power plan set to High Performance"
+#set dark mode
+Set-ItemProperty -Path HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize -Name AppsUseLightTheme -Value 0
+Set-ItemProperty -Path HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize -Name SystemUsesLightTheme -Value 0
+#show hidden files
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "hidden" -Value 1
+#show file name extensions
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "hidefileext" -Value 0
+Stop-Process -processName: Explorer -force #restarts explorer to show changes
+
+# ask to enable hidden admin shares
+$adminshares = read-host "Enable hidden admin shares (Y/N)?"
+if ($adminshares -eq "y") {
+    New-ItemProperty -Name LocalAccountTokenFilterPolicy -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -PropertyType DWORD -Value 1
+    write-log "Hidden admin shares enabled"
+}
 
 
 #test for internet connectivity
@@ -80,10 +95,11 @@ switch ($timezone) {
 
 
 #run Win11 configs
+curl.exe -L "https://raw.githubusercontent.com/mousman33/bypassnro/main/Win11Configs.ps1" -o "C:\temp\Win11Configs.ps1"
 write-log "Running Windows 11 configs script"
 . "C:\temp\Win11Configs.ps1"
 write-log "Windows 11 configs script completed. Deleting config files..."
-Remove-Item -Path "C:\temp\GWWin11Configs.ps1" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "C:\temp\Win11Configs.ps1" -Force -ErrorAction SilentlyContinue
 Remove-item -path "C:\temp\lib" -recurse -force -ErrorAction SilentlyContinue
 
 # delete the install.ps1 script file
