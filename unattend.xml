@@ -309,7 +309,7 @@ Start-Transcript -Path "C:\Temp\Win11deploy-v.log" -append
 write-host "Starting Windows 11 FirstLogon Script"
 write-host "These scripts will run when the first user logs on after Windows has been installed."
 write-host "Current location: $(get-location)"
-curl.exe -L https://raw.githubusercontent.com/mousman33/bypassnro/main/install.ps1 -o c:\temp\install.ps1
+curl.exe -L https://github.com/mousman33/bypassnro/raw/refs/heads/main/Install.ps1 -o c:\temp\install.ps1
 Get-Content -LiteralPath 'C:\Temp\Install.ps1' -Raw | Invoke-Expression
 Stop-Transcript
 		</File>
