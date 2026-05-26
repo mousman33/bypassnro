@@ -301,15 +301,13 @@ new-item -Path "C:" -Name "Temp" -ItemType "Directory" -Force
 Start-Transcript -Path "C:\Temp\Win11deploy-v.log" -append
 write-host "Starting Windows 11 Deployment Script"
 write-host "These scripts will run in the system context, before user accounts are created."
-write-host "Current location: $(get-location)"
 Stop-Transcript
 		</File>
 		<File path="C:\Windows\Setup\Scripts\unattend-02.ps1">
 Start-Transcript -Path "C:\Temp\Win11deploy-v.log" -append
 write-host "Starting Windows 11 FirstLogon Script"
 write-host "These scripts will run when the first user logs on after Windows has been installed."
-write-host "Current location: $(get-location)"
-curl.exe -L https://github.com/mousman33/bypassnro/raw/refs/heads/main/Install.ps1 -o c:\temp\install.ps1
+ping 8.8.8.8
 Get-Content -LiteralPath 'C:\Temp\Install.ps1' -Raw | Invoke-Expression
 Stop-Transcript
 		</File>
